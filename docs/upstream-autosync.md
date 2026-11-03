@@ -8,7 +8,7 @@
 - `rawtherapee-autosync-state` is a machine-owned branch pointing to the last *dispatched* upstream source commit, not a verification of build or release success.
 
 ## Workflow
-The `.github/workflows/sync-upstream.yml` workflow runs every 3 hours (UTC) and supports manual `workflow_dispatch`.
+The `.github/workflows/sync-upstream.yml` workflow runs every 3 hours (UTC), runs on changes to its own YAML in `autoenable` (including setup), and supports manual `workflow_dispatch`.
 
 1. Fetch upstream `dev` and fork `dev`.
 2. If needed, move fork `dev` only when a fast-forward is possible; never force-push or merge unrelated fork commits.

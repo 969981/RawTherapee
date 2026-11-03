@@ -1,0 +1,88 @@
+name: Sync RawTherapee upstream and build releases
+
+on:
+  schedule:
+    - cron: '17 */3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: rawtherapee-upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync-and-dispatch:
+    name: Fast-forward upstream dev and start official builds
+    if: github.repository == '969981/RawTherapee'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout automation branch
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check upstream and fast-forward dev safely
+        id: upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          git remote add upstream https://github.com/RawTherapee/RawTherapee.git
+          git fetch --no-tags upstream refs/heads/dev:refs/remotes/upstream/dev
+          git fetch --no-tags origin refs/heads/dev:refs/remotes/origin/dev
+
+          latest="$(git rev-parse refs/remotes/upstream/dev)"
+          current="$(git rev-parse refs/remotes/origin/dev)"
+          echo "Upstream dev: $latest"
+          echo "Fork dev:     $current"
+          echo "source_sha=$latest" >> "$GITHUB_OUTPUT"
+
+          if [[ "$current" != "$latest" ]]; then
+            if ! git merge-base --is-ancestor "$current" "$latest"; then
+              echo "::error::Fork dev has diverged from upstream dev. Refusing to overwrite local history."
+              exit 1
+            fi
+            git push origin "$latest:refs/heads/dev"
+            echo "Fast-forwarded fork dev to upstream $latest"
+          else
+            echo "Fork dev is already up to date."
+          fi
+
+          dispatched="$(git ls-remote --heads origin refs/heads/rawtherapee-autosync-state | awk '{print $1}')"
+          if [[ "$dispatched" == "$latest" ]]; then
+            echo "needs_build=false" >> "$GITHUB_OUTPUT"
+            echo "Already dispatched builds for $latest."
+          else
+            echo "needs_build=true" >> "$GITHUB_OUTPUT"
+            echo "New upstream source awaiting builds: $latest"
+          fi
+
+      - name: Dispatch Linux, Windows and macOS official release workflows
+        if: steps.upstream.outputs.needs_build == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ steps.upstream.outputs.source_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for workflow in appimage.yml windows.yml macos.yml; do
+            echo "Dispatching $workflow for dev ($SOURCE_SHA)"
+            gh workflow run "$workflow" --repo "$GITHUB_REPOSITORY" --ref dev
+          done
+
+      - name: Mark source commit as dispatched
+        if: steps.upstream.outputs.needs_build == 'true'
+        env:
+          SOURCE_SHA: ${{ steps.upstream.outputs.source_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git push origin "$SOURCE_SHA:refs/heads/rawtherapee-autosync-state"
+          echo "Builds dispatched for $SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Report no changes
+        if: steps.upstream.outputs.needs_build != 'true'
+        run: echo "No new upstream commits to build." >> "$GITHUB_STEP_SUMMARY"

@@ -45,28 +45,36 @@ jobs:
           echo "Fork dev:     $current"
           echo "source_sha=$latest" >> "$GITHUB_OUTPUT"
 
-          if [[ "$current" != "$latest" ]]; then
+          # Import source changes with upstream as a merge parent, but do not
+          # import upstream Actions files: GITHUB_TOKEN lacks workflows scope.
+          # Never rewrite a divergent dev branch or force-push.
+          if git merge-base --is-ancestor "$latest" "$current"; then
+            echo "needs_build=false" >> "$GITHUB_OUTPUT"
+            echo "Upstream $latest is already contained in fork dev."
+          else
             if ! git merge-base --is-ancestor "$current" "$latest"; then
-              echo "::error::Fork dev has diverged from upstream dev. Refusing to overwrite local history."
+              echo "::error::Fork dev has diverged from upstream dev. Manual review required."
               exit 1
             fi
-            git push origin "$latest:refs/heads/dev"
-            echo "Fast-forwarded fork dev to upstream $latest"
-          else
-            echo "Fork dev is already up to date."
-          fi
-
-          dispatched="$(git ls-remote --heads origin refs/heads/rawtherapee-autosync-state | awk '{print $1}')"
-          if [[ "$dispatched" == "$latest" ]]; then
-            echo "needs_build=false" >> "$GITHUB_OUTPUT"
-            echo "Already dispatched builds for $latest."
-          else
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git switch -C dev "refs/remotes/origin/dev"
+            git merge --no-ff --no-commit "$latest"
+            # Retain the complete existing workflow tree, including deletions
+            # of any new upstream-only workflows in the merge index.
+            git restore --source="$current" --staged --worktree -- .github/workflows
+            if ! git diff --cached --quiet "$current" -- .github/workflows; then
+              echo "::error::Workflow files changed after restore; refusing to push."
+              exit 1
+            fi
+            git commit -m "chore(sync): import upstream dev $latest without upstream workflows"
+            git push origin HEAD:refs/heads/dev
             echo "needs_build=true" >> "$GITHUB_OUTPUT"
-            echo "New upstream source awaiting builds: $latest"
+            echo "Imported upstream source $latest, preserving fork workflows."
           fi
 
       - name: Dispatch Linux, Windows and macOS official release workflows
-        if: steps.upstream.outputs.needs_build == 'true'
+        if: steps.upstream.outputs.needs_build == 'true' || github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_SHA: ${{ steps.upstream.outputs.source_sha }}
@@ -77,16 +85,6 @@ jobs:
             echo "Dispatching $workflow for dev ($SOURCE_SHA)"
             gh workflow run "$workflow" --repo "$GITHUB_REPOSITORY" --ref dev
           done
-
-      - name: Mark source commit as dispatched
-        if: steps.upstream.outputs.needs_build == 'true'
-        env:
-          SOURCE_SHA: ${{ steps.upstream.outputs.source_sha }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          git push origin "$SOURCE_SHA:refs/heads/rawtherapee-autosync-state"
-          echo "Builds dispatched for $SOURCE_SHA" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Report no changes
         if: steps.upstream.outputs.needs_build != 'true'

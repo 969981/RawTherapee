@@ -140,7 +140,7 @@ jobs:
             
 
   armbuild:
-    runs-on: macos-14
+    runs-on: macos-15
     permissions:
       contents: write
     steps:
@@ -164,7 +164,7 @@ jobs:
         env:
           IDENT: '-'
           CMAKE_CXX_STANDARD: 11
-          PKG_CONFIG_PATH: /opt/homebrew/opt/libtiff/lib/pkgconfig:opt/homebrew/opt/libffi/lib/pkgconfig:/ope/homebrew/opt/expat/lib/pkgconfig
+          PKG_CONFIG_PATH: /opt/homebrew/opt/libtiff/lib/pkgconfig:/opt/homebrew/opt/libffi/lib/pkgconfig:/opt/homebrew/opt/expat/lib/pkgconfig
           C_FLAGS: >
             -arch arm64 -Xpreprocessor -fopenmp /opt/homebrew/opt/libomp/lib/libomp.dylib -I/opt/homebrew/opt/libomp/include -I/opt/homebrew/include -I/opt/homebrew/opt/gdk-pixbuf/include -I/opt/homebrew/opt/libiconv/include -I/opt/homebrew/opt/libxml2/include -I/opt/homebrew/opt/expat/include -I/opt/homebrew/opt/libtiff/include
         run: |

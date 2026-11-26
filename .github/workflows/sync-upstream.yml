@@ -20,7 +20,7 @@ concurrency:
 
 jobs:
   sync-and-dispatch:
-    name: Fast-forward upstream dev and start official builds
+    name: Safely merge upstream dev and start official builds
     if: github.repository == '969981/RawTherapee'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -30,7 +30,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Check upstream and fast-forward dev safely
+      - name: Check upstream and merge dev safely
         id: upstream
         shell: bash
         run: |
@@ -53,8 +53,16 @@ jobs:
             echo "Upstream $latest is already contained in fork dev."
           else
             if ! git merge-base --is-ancestor "$current" "$latest"; then
-              echo "::error::Fork dev has diverged from upstream dev. Manual review required."
-              exit 1
+              # A previous source-only merge creates fork-only merge commits.
+              # Accept that topology ONLY when the fork's source equals the common base.
+              base="$(git merge-base "$current" "$latest")"
+              test -n "$base"
+              if ! git diff --quiet "$base" "$current" -- . ':(exclude).github/workflows/**'; then
+                echo "::error::Fork dev contains divergent non-workflow changes. Manual review required."
+                git diff --stat "$base" "$current" -- . ':(exclude).github/workflows/**'
+                exit 1
+              fi
+              echo "Only fork workflows/history differ from common base $base; safe source merge."
             fi
             git config user.name 'github-actions[bot]'
             git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
